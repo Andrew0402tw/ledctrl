@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ESP8266 LED 控制器</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  body {
+    margin: 0; padding: 20px;
+    background: #1c1c1e;  /* 深色背景 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+      Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    color: #f2f2f7; /* 淺色文字 */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+  h1 {
+    font-weight: 600;
+    margin-bottom: 30px;
+    font-size: 1.8rem;
+    color: #f2f2f7;
+  }
+  .status {
+    margin-bottom: 15px;
+    font-weight: 500;
+    color: #f2f2f7;
+  }
+  .container {
+    max-width: 600px;
+    width: 100%;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .panel {
+    background: #2c2c2e; /* 深灰色卡片背景 */
+    border-radius: 16px;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.8),
+      0 1px 3px rgba(0,0,0,0.6);
+    padding: 20px;
+    flex: 1 1 280px;
+    min-width: 280px;
+    color: #f2f2f7;
+  }
+  .panel h2 {
+    font-weight: 600;
+    font-size: 1.2rem;
+    margin-bottom: 15px;
+    color: #f2f2f7;
+  }
+  button.btn {
+    background: #3a3a3c;  /* 深色按鈕 */
+    border: none;
+    border-radius: 14px;
+    padding: 12px 18px;
+    margin: 6px 4px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    color: #f2f2f7;  /* 淺色字 */
+    user-select: none;
+    transition:
+      background-color 0.25s ease,
+      color 0.25s ease,
+      box-shadow 0.25s ease;
+    box-shadow:
+      inset 0 0 0 0 transparent;
+    min-width: 80px;
+    text-align: center;
+  }
+  button.btn:hover {
+    background: #48484a;
+  }
+  button.btn.selected {
+    background: #ffffff; /* 選中白底 */
+    color: #007aff;      /* 藍字 */
+    box-shadow:
+      inset 0 3px 5px rgba(0,0,0,0.2);
+  }
+  #log {
+    margin-top: 20px;
+    background: #2c2c2e;
+    border-radius: 14px;
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.6);
+    padding: 12px 16px;
+    font-size: 0.95rem;
+    color: #d0d0d5;
+    word-break: break-word;
+    max-width: 600px;
+    width: 100%;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid #444444;
+    background: #3a3a3c;
+    color: #f2f2f7;
+    font-size: 1rem;
+    font-weight: 500;
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    transition: border-color 0.25s ease;
+  }
+  input[type="text"]::placeholder {
+    color: #888888;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: #007aff;
+    background: #48484a;
+  }
+</style>
+</head>
+<body>
+
+  <h1>ESP8266 LED 控制器</h1>
+  <div class="status">MQTT 狀態：<span id="mqttStatus">🔴 未連線</span></div>
+
+  <div class="container">
+    <div class="panel" id="modePanel">
+      <h2>模式選擇</h2>
+      <button class="btn" data-mode="static">靜態</button>
+      <button class="btn" data-mode="blink">閃爍</button>
+      <button class="btn" data-mode="breathe">呼吸燈</button>
+      <button class="btn" data-mode="chase">追逐燈</button>
+      <button class="btn" data-mode="color">彩虹</button>
+      <button class="btn" data-mode="off">關閉</button>
+    </div>
+
+    <div class="panel" id="colorPanel">
+      <h2>顏色選擇</h2>
+      <button class="btn" data-color="red">🔴 紅色</button>
+      <button class="btn" data-color="green">🟢 綠色</button>
+      <button class="btn" data-color="blue">🔵 藍色</button>
+      <button class="btn" data-color="yellow">🟡 黃色</button>
+      <button class="btn" data-color="cyan">🧊 青色</button>
+      <button class="btn" data-color="magenta">💜 洋紅</button>
+      <button class="btn" data-color="white">⬜ 白色</button>
+      <button class="btn" data-color="orange">🟠 橘色</button>
+      <button class="btn" data-color="pink">🌸 粉紅色</button>
+      <button class="btn" data-color="purple">🟣 紫色</button>
+      <button class="btn" data-color="teal">🦚 水鴨綠</button>
+    </div>
+  </div>
+
+  <div class="panel" style="max-width:600px; margin-top: 20px;">
+    <h2>自訂 RGB 色碼</h2>
+    <input type="text" id="customColor" placeholder="例如：255,100,50" />
+    <button class="btn" id="sendCustomRGBBtn">送出</button>
+  </div>
+
+  <div id="log">最近發送：無</div>
+
+  <script>
+    const mqttStatus = document.getElementById("mqttStatus");
+    const log = document.getElementById("log");
+    const topic = "dcmt/1122109";
+
+    // 連線到 mqttgo.io 的 WebSocket Broker
+    const client = mqtt.connect("wss://broker.MQTTGO.io:8084/mqtt");
+
+    client.on("connect", () => {
+      mqttStatus.textContent = "🟢 已連線";
+    });
+
+    client.on("error", (error) => {
+      mqttStatus.textContent = "🔴 連線錯誤";
+      console.error("連線錯誤", error);
+    });
+
+    client.on("close", () => {
+      mqttStatus.textContent = "🔴 已斷線";
+    });
+
+    function publishMessage(msg) {
+      if (client.connected) {
+        client.publish(topic, msg);
+        log.textContent = "最近發送：" + msg;
+      } else {
+        alert("尚未連上 MQTT broker");
+      }
+    }
+
+    let currentMode = "";
+    const modePanel = document.getElementById("modePanel");
+    modePanel.addEventListener("click", (e) => {
+      if (!e.target.classList.contains("btn")) return;
+
+      [...modePanel.querySelectorAll(".btn")].forEach(b => b.classList.remove("selected"));
+
+      e.target.classList.add("selected");
+
+      currentMode = e.target.dataset.mode;
+      log.textContent = `模式已切換為：${e.target.textContent}`;
+
+      // 彩虹與關閉模式點擊即發送訊息
+      if (currentMode === "color" || currentMode === "off") {
+        publishMessage(currentMode);
+      }
+    });
+
+    const colorPanel = document.getElementById("colorPanel");
+    colorPanel.addEventListener("click", (e) => {
+      if (!e.target.classList.contains("btn")) return;
+      const color = e.target.dataset.color;
+      if (!color) return;
+
+      if (currentMode === "static") {
+        publishMessage(color);
+      } else if (currentMode) {
+        publishMessage(currentMode + ":" + color);
+      } else {
+        alert("請先選擇模式");
+      }
+    });
+
+    const sendCustomRGBBtn = document.getElementById("sendCustomRGBBtn");
+    sendCustomRGBBtn.addEventListener("click", () => {
+      const val = document.getElementById("customColor").value.trim();
+      if (!/^\d{1,3},\d{1,3},\d{1,3}$/.test(val)) {
+        alert("請輸入有效的 RGB 格式，例如：255,100,50");
+        return;
+      }
+
+      if (currentMode === "color" || currentMode === "off") {
+        publishMessage(currentMode);
+      } else if (currentMode === "static") {
+        publishMessage(val);
+      } else if (currentMode) {
+        publishMessage(currentMode + ":" + val);
+      } else {
+        alert("請先選擇模式");
+      }
+    });
+  </script>
+
+</body>
+</html>
